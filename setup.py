@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='python-obelisk',
-    version="0.1.3",
+    version="0.2.0",
     install_requires=['twisted', 'ecdsa', 'pyzmq'],
     packages=['obelisk'],
     maintainer='Dionysis Zindros',
