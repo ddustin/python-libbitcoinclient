@@ -1,12 +1,14 @@
 import struct
 
 from zmqbase import ClientBase
-from twisted.internet import reactor
+from zmq_fallback import ZmqSocket
+from twisted.internet import reactor, task
+from binascii import unhexlify
 
+import zmq
 import bitcoin
 import serialize
 import error_code
-
 
 def unpack_error(data):
     value = struct.unpack_from('<I', data, 0)[0]
@@ -22,6 +24,7 @@ def pack_block_index(index):
     else:
         raise ValueError("Unknown index type")
 
+
 def spend_checksum(hash, index):
     hash = hash[::-1]
     index_bytes = struct.pack("<I", index)
@@ -32,11 +35,13 @@ def spend_checksum(hash, index):
     # value & (2**n - 1) is the same as value % 2**n
     return value & (2**63 - 1)
 
+
 class PointIdent:
     Output = False
     Spend = True
 
-class ObeliskOfLightClient(ClientBase):
+
+class LibbitcoinClient(ClientBase):
     valid_messages = [
         'fetch_block_header',
         'fetch_history',
@@ -53,13 +58,46 @@ class ObeliskOfLightClient(ClientBase):
         'total_connections',
         'update',
         'renew'
+        'broadcast_transaction',
+        'validate'
     ]
 
-    subscribed = 0
+    def __init__(self, address, log=None, heartbeat_port=9092, refresh_socket=True):
+        ClientBase.__init__(self, address)
+        self. address = address
+        self.connected = False
+        self.log = log
+        self.subscribed = 0
+        self.listen_heartbeat(heartbeat_port)
+        if refresh_socket:
+            task.LoopingCall(self.refresh_connection).start(600)
 
     def adjust_subscribed(self):
         if self.subscribed > 0:
             self.subscribed -= 1
+
+    def listen_heartbeat(self, port):
+        def timeout():
+            self.connected = False
+            if self.log:
+                self.log.critical("Libbitcoin server offline")
+
+        def frame_received(frame, more):
+            t.reset(10)
+            if not self.connected:
+                self.connected = True
+                if self.log:
+                    self.log.info("Libbitcoin server online")
+
+        t = reactor.callLater(10, timeout)
+
+        s = ZmqSocket(frame_received, 3, type=zmq.SUB)
+        s.connect(self.address[:len(self.address) - 4] + str(port))
+
+    def refresh_connection(self):
+        if self.subscribed == 0:
+            self._socket.close()
+            self._socket = self.setup(self.address)
 
     # Command implementations
     def renew_address(self, address, cb=None):
@@ -259,6 +297,14 @@ class ObeliskOfLightClient(ClientBase):
         """Fetches the total number of connections."""
         self.send_command('protocol.total_connections', cb=cb)
 
+    def broadcast(self, tx, cb=None):
+        """A transaction broadcast function."""
+        self.send_command("protocol.broadcast_transaction", unhexlify(tx), cb=cb)
+
+    def validate(self, tx, cb=None):
+        """Check if a tx is in the mempool"""
+        self.send_command("transaction_pool.validate", unhexlify(tx), cb=cb)
+
     # receive handlers
     def _on_fetch_block_header(self, data):
         error = unpack_error(data)
@@ -382,3 +428,11 @@ class ObeliskOfLightClient(ClientBase):
         if not self.subscribed % 1000:
             print "Renew ok", self.subscribed
         return (error, True)
+
+    def _on_broadcast_transaction(self, data):
+        error = unpack_error(data)
+        return (error, data)
+
+    def _on_validate(self, data):
+        error = unpack_error(data)
+        return (error, data)
