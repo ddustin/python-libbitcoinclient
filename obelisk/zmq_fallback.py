@@ -44,3 +44,6 @@ class ZmqSocket:
         if more:
             more = zmq.SNDMORE
         self._socket.send(data, more)
+
+    def close(self):
+        self._socket.close()

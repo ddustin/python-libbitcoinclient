@@ -1,6 +1,7 @@
 import struct
 
 from zmqbase import ClientBase
+from twisted.internet import reactor
 
 import bitcoin
 import serialize
@@ -55,6 +56,10 @@ class ObeliskOfLightClient(ClientBase):
     ]
 
     subscribed = 0
+
+    def adjust_subscribed(self):
+        if self.subscribed > 0:
+            self.subscribed -= 1
 
     # Command implementations
     def renew_address(self, address, cb=None):
@@ -131,6 +136,8 @@ class ObeliskOfLightClient(ClientBase):
                     subscriptions.pop(address_hash)
         if cb:
             cb(None, address)
+        if self.subscribed > 0:
+            self.subscribed -= 1
 
     def fetch_block_header(self, index, cb):
         """Fetches the block header by height."""
@@ -344,6 +351,7 @@ class ObeliskOfLightClient(ClientBase):
 
     def _on_subscribe(self, data):
         self.subscribed += 1
+        reactor.callLater(600, self.adjust_subscribed)
         error = unpack_error(data)
         if error:
             print "Error subscribing", error
@@ -367,6 +375,7 @@ class ObeliskOfLightClient(ClientBase):
 
     def _on_renew(self, data):
         self.subscribed += 1
+        reactor.callLater(600, self.adjust_subscribed)
         error = unpack_error(data)
         if error:
             print "Error subscribing"
