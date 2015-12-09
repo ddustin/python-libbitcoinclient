@@ -64,7 +64,7 @@ class LibbitcoinClient(ClientBase):
 
     def __init__(self, address, log=None, heartbeat_port=9092, refresh_socket=True):
         ClientBase.__init__(self, address)
-        self. address = address
+        self.address = address
         self.connected = False
         self.log = log
         self.subscribed = 0
