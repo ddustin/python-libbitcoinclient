@@ -23,8 +23,8 @@ class ZmqSocket:
         self._socket.connect(address)
         if self._type == zmq.SUB:
             self._socket.setsockopt(zmq.SUBSCRIBE, '')
-        l = task.LoopingCall(self.poll)
-        l.start(0.1)
+        self.loop = task.LoopingCall(self.poll)
+        self.loop.start(0.1)
 
     def poll(self):
         # keep polling till we have no more data
@@ -46,4 +46,5 @@ class ZmqSocket:
         self._socket.send(data, more)
 
     def close(self):
+        self.loop.stop()
         self._socket.close()
