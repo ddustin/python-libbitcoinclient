@@ -81,6 +81,8 @@ class LibbitcoinClient(ClientBase):
             self.connected = False
             if self.log:
                 self.log.critical("Libbitcoin server offline")
+            s.close()
+            self.listen_heartbeat(port)
 
         def frame_received(frame, more):
             t.reset(10)
