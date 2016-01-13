@@ -57,7 +57,7 @@ class LibbitcoinClient(ClientBase):
         'fetch_stealth',
         'total_connections',
         'update',
-        'renew'
+        'renew',
         'broadcast_transaction',
         'validate'
     ]
