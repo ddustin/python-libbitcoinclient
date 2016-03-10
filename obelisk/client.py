@@ -10,6 +10,7 @@ import bitcoin
 import serialize
 import error_code
 
+
 def unpack_error(data):
     value = struct.unpack_from('<I', data, 0)[0]
     return error_code.error_code.name_from_id(value)
@@ -62,19 +63,15 @@ class LibbitcoinClient(ClientBase):
         'validate'
     ]
 
-    def __init__(self, address, log=None, heartbeat_port=9092, refresh_socket=True):
+    def __init__(self, address, public_key=None, log=None, heartbeat_port=9092):
         ClientBase.__init__(self, address)
         self.address = address
+        self.public_key = public_key
         self.connected = False
         self.log = log
         self.subscribed = 0
         self.listen_heartbeat(heartbeat_port)
-        if refresh_socket:
-            task.LoopingCall(self.refresh_connection).start(600)
-
-    def adjust_subscribed(self):
-        if self.subscribed > 0:
-            self.subscribed -= 1
+        task.LoopingCall(self.renew_subscriptions).start(120, now=False)
 
     def listen_heartbeat(self, port):
         def timeout():
@@ -94,12 +91,13 @@ class LibbitcoinClient(ClientBase):
         t = reactor.callLater(10, timeout)
 
         s = ZmqSocket(frame_received, 3, type=zmq.SUB)
-        s.connect(self.address[:len(self.address) - 4] + str(port))
+        s.connect(self.address[:len(self.address) - 4] + str(port), self.public_key)
 
-    def refresh_connection(self):
-        if self.subscribed == 0:
-            self._socket.close()
-            self._socket = self.setup(self.address)
+    def renew_subscriptions(self):
+        for address in self._subscriptions["address"]:
+            for cb in self._subscriptions["address"][address]:
+                self.subscribed -= 1
+                self.renew_address(address)
 
     # Command implementations
     def renew_address(self, address, cb=None):
@@ -128,9 +126,9 @@ class LibbitcoinClient(ClientBase):
         self.send_command('address.subscribe', data, cb)
         if notification_cb:
             subscriptions = self._subscriptions['address']
-            if address_hash not in subscriptions:
-                subscriptions[address_hash] = []
-            subscriptions = self._subscriptions['address'][address_hash]
+            if address not in subscriptions:
+                subscriptions[address] = []
+            subscriptions = self._subscriptions['address'][address]
             if notification_cb not in subscriptions:
                 subscriptions.append(notification_cb)
 
@@ -169,11 +167,11 @@ class LibbitcoinClient(ClientBase):
             bitcoin.bc_address_to_hash_160(address)
 
         subscriptions = self._subscriptions['address']
-        if address_hash in subscriptions:
-            if subscribed_cb in subscriptions[address_hash]:
-                subscriptions[address_hash].remove(subscribed_cb)
-                if len(subscriptions[address_hash]) == 0:
-                    subscriptions.pop(address_hash)
+        if address in subscriptions:
+            if subscribed_cb in subscriptions[address]:
+                subscriptions[address].remove(subscribed_cb)
+                if len(subscriptions[address]) == 0:
+                    subscriptions.pop(address)
         if cb:
             cb(None, address)
         if self.subscribed > 0:
@@ -399,7 +397,6 @@ class LibbitcoinClient(ClientBase):
 
     def _on_subscribe(self, data):
         self.subscribed += 1
-        reactor.callLater(600, self.adjust_subscribed)
         error = unpack_error(data)
         if error:
             print "Error subscribing", error
@@ -410,20 +407,20 @@ class LibbitcoinClient(ClientBase):
     def _on_update(self, data):
         address_version = struct.unpack_from('B', data, 0)[0]
         address_hash = data[1:21]
+        address = bitcoin.hash_160_to_bc_address(address_hash, address_version)
 
         height = struct.unpack_from('I', data, 21)[0]
         block_hash = data[25:57]
         tx = data[57:]
 
-        if address_hash in self._subscriptions['address']:
-            for update_cb in self._subscriptions['address'][address_hash]:
+        if address in self._subscriptions['address']:
+            for update_cb in self._subscriptions['address'][address]:
                 update_cb(
                     address_version, address_hash, height, block_hash, tx
                 )
 
     def _on_renew(self, data):
         self.subscribed += 1
-        reactor.callLater(600, self.adjust_subscribed)
         error = unpack_error(data)
         if error:
             print "Error subscribing"

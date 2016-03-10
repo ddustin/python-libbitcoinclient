@@ -21,6 +21,7 @@ class ClientBase(object):
 
     def __init__(self,
                  address,
+                 public_key=None,
                  block_address=None,
                  tx_address=None,
                  version=3):
@@ -29,7 +30,7 @@ class ClientBase(object):
         self._block_messages = []
         self.zmq_version = version
         self.running = 1
-        self._socket = self.setup(address)
+        self._socket = self.setup(address, public_key)
         if block_address:
             self._socket_block = self.setup_block_sub(
                 block_address, self.on_raw_block)
@@ -129,9 +130,9 @@ class ClientBase(object):
             self._tx_messages = []
             self._tx_cb(tx_data)
 
-    def setup(self, address):
+    def setup(self, address, public_key=None):
         s = ZmqSocket(self.frame_received, self.zmq_version)
-        s.connect(address)
+        s.connect(address, public_key)
         return s
 
     def setup_block_sub(self, address, cb):

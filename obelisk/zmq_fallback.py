@@ -17,9 +17,14 @@ class ZmqSocket:
         self._type = type
         if self._type == 'SUB':
             self._type = zmq.SUB
+        self.public_key, self.secret_key = zmq.curve_keypair()
 
-    def connect(self, address):
+    def connect(self, address, public_key=None):
         self._socket = ZmqSocket.context.socket(self._type)
+        if public_key:
+            self._socket.curve_serverkey = public_key
+            self._socket.curve_publickey = self.public_key
+            self._socket.curve_secretkey = self.secret_key
         self._socket.connect(address)
         if self._type == zmq.SUB:
             self._socket.setsockopt(zmq.SUBSCRIBE, '')
