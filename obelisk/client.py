@@ -5,6 +5,7 @@ from zmq_fallback import ZmqSocket
 from twisted.internet import reactor, task
 from binascii import unhexlify
 
+import time
 import zmq
 import bitcoin
 import serialize
@@ -95,9 +96,12 @@ class LibbitcoinClient(ClientBase):
 
     def renew_subscriptions(self):
         for address in self._subscriptions["address"]:
-            for cb in self._subscriptions["address"][address]:
+            for cb in self._subscriptions["address"][address]["callbacks"]:
                 self.subscribed -= 1
-                self.renew_address(address)
+                if self._subscriptions["address"][address]["expiration"] > time.time():
+                    self.renew_address(address)
+                else:
+                    self._subscriptions["address"].pop(address)
 
     # Command implementations
     def renew_address(self, address, cb=None):
@@ -127,10 +131,13 @@ class LibbitcoinClient(ClientBase):
         if notification_cb:
             subscriptions = self._subscriptions['address']
             if address not in subscriptions:
-                subscriptions[address] = []
+                subscriptions[address] = {
+                    "expiration": time.time() + 86400,
+                    "callbacks": []
+                }
             subscriptions = self._subscriptions['address'][address]
-            if notification_cb not in subscriptions:
-                subscriptions.append(notification_cb)
+            if notification_cb not in subscriptions["callbacks"]:
+                subscriptions["callbacks"].append(notification_cb)
 
     def subscribe_prefix(self, prefix, notification_cb=None, cb=None):
         # prefix = obelisk.Binary.from_string("1011110101")
@@ -168,9 +175,9 @@ class LibbitcoinClient(ClientBase):
 
         subscriptions = self._subscriptions['address']
         if address in subscriptions:
-            if subscribed_cb in subscriptions[address]:
-                subscriptions[address].remove(subscribed_cb)
-                if len(subscriptions[address]) == 0:
+            if subscribed_cb in subscriptions[address]["callbacks"]:
+                subscriptions[address]["callbacks"].remove(subscribed_cb)
+                if len(subscriptions[address]["callbacks"]) == 0:
                     subscriptions.pop(address)
         if cb:
             cb(None, address)
@@ -414,7 +421,7 @@ class LibbitcoinClient(ClientBase):
         tx = data[57:]
 
         if address in self._subscriptions['address']:
-            for update_cb in self._subscriptions['address'][address]:
+            for update_cb in self._subscriptions['address'][address]["callbacks"]:
                 update_cb(
                     address_version, address_hash, height, block_hash, tx
                 )

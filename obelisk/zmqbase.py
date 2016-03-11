@@ -8,6 +8,7 @@ import logging
 #except ImportError:
 #    from zmq_fallback import ZmqSocket
 from zmq_fallback import ZmqSocket
+from twisted.internet import defer, reactor
 
 
 SNDMORE = 1
@@ -29,7 +30,8 @@ class ClientBase(object):
         self._tx_messages = []
         self._block_messages = []
         self.zmq_version = version
-        self.running = 1
+        self.address = address
+        self.public_key = public_key
         self._socket = self.setup(address, public_key)
         if block_address:
             self._socket_block = self.setup_block_sub(
@@ -38,6 +40,7 @@ class ClientBase(object):
             self._socket_tx = self.setup_transaction_sub(
                 tx_address, self.on_raw_transaction)
         self._subscriptions = {'address': {}}
+        self._timeouts = {}
 
     # Message arrived
     def on_raw_message(self, id, cmd, data):
@@ -69,6 +72,8 @@ class ClientBase(object):
 
         if cb:
             self._subscriptions[tx_id] = cb
+        timeout = reactor.callLater(4, self._reconnect)
+        self._timeouts[tx_id] = [timeout, command, data, cb]
         return tx_id
 
     def unsubscribe(self, cb):
@@ -77,9 +82,28 @@ class ClientBase(object):
                 self._subscriptions.pop(sub_id)
 
     def trigger_callbacks(self, tx_id, *args):
+        if tx_id in self._timeouts:
+            self._timeouts[tx_id][0].cancel()
+            del self._timeouts[tx_id]
         if tx_id in self._subscriptions:
             self._subscriptions[tx_id](*args)
             del self._subscriptions[tx_id]
+
+    def _reconnect(self):
+        self.log.error("Libbitcoin server timed out. Refreshing socket and resending requests.")
+        self._socket.close()
+        self._socket = self.setup(self.address, self.public_key)
+        for tx_id in self._timeouts.keys():
+            v = self._timeouts[tx_id]
+            if v[0].active():
+                v[0].cancel()
+            self.send_command(v[1], data=v[2], cb=v[3])
+            del self._timeouts[tx_id]
+            del self._subscriptions[tx_id]
+        for address in self._subscriptions["address"].keys():
+            callbacks = self._subscriptions["address"][address]["callbacks"]
+            for callback in callbacks:
+                self.subscribe_address(address, callback)
 
     # Low level zmq abstraction into obelisk frames
     def send(self, *args, **kwargs):
