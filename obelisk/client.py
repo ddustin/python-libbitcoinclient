@@ -64,15 +64,28 @@ class LibbitcoinClient(ClientBase):
         'validate'
     ]
 
-    def __init__(self, address, public_key=None, log=None, heartbeat_port=9092):
+    def __init__(self, address, addresses=None, public_key=None, log=None, heartbeat_port=9092):
+        if addresses is not None:
+            address = addresses[0]
         ClientBase.__init__(self, address)
         self.address = address
+        self.addresses = addresses
         self.public_key = public_key
         self.connected = False
         self.log = log
         self.subscribed = 0
         self.listen_heartbeat(heartbeat_port)
         task.LoopingCall(self.renew_subscriptions).start(120, now=False)
+
+    def _reconnect(self):
+        if self.addresses is not None:
+            try:
+                index = self.addresses.index(self.address)
+                index = (index + 1) % len(self.addresses)
+                self.address = self.addresses[index]
+            except ValueError:
+                pass
+        return ClientBase._reconnect(self)
 
     def listen_heartbeat(self, port):
         def timeout():
