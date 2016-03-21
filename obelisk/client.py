@@ -64,18 +64,26 @@ class LibbitcoinClient(ClientBase):
         'validate'
     ]
 
-    def __init__(self, address, public_key=None, log=None, heartbeat_port=9092):
+    def __init__(self, address, log=None, heartbeat_port=9092):
+        """
+        Args:
+            address: a `tuple` of (server_url, public_key) pairs. The public key may be None if no encryption is used.
+                a `list` of `tuples` may also be passed in you want to rotate servers on disconnect.
+        """
         self.addresses = None
         if isinstance(address, list):
             self.addresses = address
+            self.address = address[0][0]
+            self.public_key = address[0][1]
+        else:
             self.address = address[0]
-        ClientBase.__init__(self, address)
-        self.address = address
-        self.public_key = public_key
+            self.public_key = address[1]
+
         self.connected = False
         self.log = log
         self.subscribed = 0
         self.listen_heartbeat(heartbeat_port)
+        ClientBase.__init__(self, self.address, self.public_key)
         task.LoopingCall(self.renew_subscriptions).start(120, now=False)
 
     def cycleAddressIfNeeded(self):
@@ -83,13 +91,14 @@ class LibbitcoinClient(ClientBase):
             try:
                 index = self.addresses.index(self.address)
                 index = (index + 1) % len(self.addresses)
-                self.address = self.addresses[index]
+                self.address = self.addresses[index][0]
+                self.public_key = self.addresses[index][1]
             except ValueError:
                 pass
 
     def _reconnect(self):
-        self.cycleAddress()
-        return cycleAddressIfNeeded._reconnect(self)
+        self.cycleAddressIfNeeded()
+        return ClientBase._reconnect(self)
 
     def listen_heartbeat(self, port):
         def timeout():
